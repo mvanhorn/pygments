@@ -11,7 +11,7 @@
 import re
 
 from pygments.lexer import ExtendedRegexLexer, RegexLexer, default, words, \
-    bygroups, include, using, line_re
+    bygroups, include, using, this, line_re
 from pygments.token import Text, Comment, Operator, Keyword, Name, String, \
     Number, Punctuation, Whitespace, Literal, Error, Generic
 from pygments.lexers.shell import BashLexer
@@ -23,7 +23,7 @@ __all__ = ['IniLexer', 'SystemdLexer', 'DesktopLexer', 'RegeditLexer', 'Properti
            'TerraformLexer', 'TermcapLexer', 'TerminfoLexer',
            'PkgConfigLexer', 'PacmanConfLexer', 'AugeasLexer', 'TOMLLexer',
            'NestedTextLexer', 'SingularityLexer', 'UnixConfigLexer',
-           'BicepLexer']
+           'CaddyfileLexer', 'BicepLexer']
 
 
 class IniLexer(RegexLexer):
@@ -247,7 +247,7 @@ class PropertiesLexer(RegexLexer):
             # line continuations; these gobble whitespace at the beginning of the next line
             (r'(\\\n)([^\S\n]*)', bygroups(String.Escape, Whitespace)),
             # other escapes
-            (r'\\(.|\n)', String.Escape),
+            (r'\\([\s\S])', String.Escape),
         ],
     }
 
@@ -448,7 +448,7 @@ class ApacheConfLexer(RegexLexer):
              r'os|productonly|full|emerg|alert|crit|error|warn|'
              r'notice|info|debug|registry|script|inetd|standalone|'
              r'user|group)\b', Keyword),
-            (r'"([^"\\]*(?:\\(.|\n)[^"\\]*)*)"', String.Double),
+            (r'"([^"\\]*(?:\\([\s\S])[^"\\]*)*)"', String.Double),
             (r'[^\s"\\]+', Text)
         ],
     }
@@ -1434,6 +1434,71 @@ class UnixConfigLexer(RegexLexer):
     }
 
 
+class CaddyfileLexer(RegexLexer):
+    """
+    Lexer for Caddyfile, the configuration file format of the Caddy web server.
+    """
+
+    name = 'Caddyfile'
+    url = 'https://caddyserver.com/docs/caddyfile'
+    aliases = ['caddyfile', 'caddy']
+    filenames = ['Caddyfile']
+    version_added = '2.21'
+
+    # The standard HTTP directives shipped with Caddy.
+    directives = (
+        'abort', 'acme_server', 'basic_auth', 'bind', 'encode', 'error',
+        'file_server', 'forward_auth', 'handle', 'handle_errors',
+        'handle_path', 'header', 'import', 'invoke', 'log', 'map', 'metrics',
+        'php_fastcgi', 'push', 'redir', 'request_body', 'request_header',
+        'respond', 'reverse_proxy', 'rewrite', 'root', 'route', 'templates',
+        'tls', 'tracing', 'try_files', 'uri', 'vars',
+    )
+
+    tokens = {
+        'root': [
+            # Directives are only keywords as the first token on a line, so
+            # anchor them to the start of the (possibly indented) line. This
+            # consumes the preceding newline(s)/indentation itself, otherwise
+            # the generic whitespace rule below would swallow it first.
+            (r'((?:\A|\s*\n)[ \t]*)(' + '|'.join(directives) + r')\b',
+             bygroups(Whitespace, Keyword)),
+            (r'\s+', Whitespace),
+            (r'#.*', Comment.Single),
+            # Heredoc: <<LABEL <args> ... LABEL. The remainder of the opening
+            # line (e.g. a status code) is not part of the body, so re-lex it;
+            # the closing label must stand alone on its line.
+            (r'(<<)([a-zA-Z_]\w*)(.*\n)((?:.*\n)*?)([ \t]*)(\2)(?=[ \t]*$)',
+             bygroups(Operator, String.Delimiter, using(this),
+                      String.Heredoc, Whitespace, String.Delimiter)),
+            # Placeholders: {path}, {http.request.uri}, {$ENV}, {args[0]}, ...
+            (r'\{[^{}\s]+\}', Name.Variable),
+            # Blocks and snippet parentheses
+            (r'[(){}]', Punctuation),
+            # Named matcher, e.g. @api
+            (r'@[\w.-]+', Name.Decorator),
+            (r'"', String.Double, 'string'),
+            (r'`', String.Backtick, 'backtick'),
+            # Numbers, durations and sizes (443, 200, 30s, 1.5m, 10MB); a
+            # trailing dot or more digits/letters means it is an address or
+            # hostname, which must stay Text.
+            (r'\d+(?:\.\d+)?[a-zA-Z]*(?=[\s#{}()"`]|$)', Number),
+            (r'[^\s#{}()"`]+', Text),
+        ],
+        'string': [
+            (r'\\.', String.Escape),
+            (r'\{[^{}\s]+\}', Name.Variable),
+            (r'[^"\\{]+', String.Double),
+            (r'"', String.Double, '#pop'),
+            (r'.', String.Double),
+        ],
+        'backtick': [
+            (r'[^`]+', String.Backtick),
+            (r'`', String.Backtick, '#pop'),
+        ],
+    }
+
+
 class BicepLexer(RegexLexer):
     """
     Lexer for Azure Bicep declarative deployment files.
@@ -1448,7 +1513,7 @@ class BicepLexer(RegexLexer):
     aliases = ['bicep']
     filenames = ['*.bicep', '*.bicepparam']
     url = 'https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/'
-    version_added = '2.20'
+    version_added = '2.22'
 
     declarations = (
         'param', 'var', 'resource', 'module', 'output', 'targetScope',

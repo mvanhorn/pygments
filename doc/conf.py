@@ -5,6 +5,7 @@
 import os
 import re
 import sys
+import glob
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -17,6 +18,9 @@ import pygments.formatters
 import pygments.lexers
 import pygments.styles
 import tests.contrast.test_contrasts as test_contrasts
+
+from docutils import nodes
+from sphinx.environment.adapters.toctree import document_toc
 
 # -- General configuration -----------------------------------------------------
 
@@ -141,7 +145,7 @@ html_additional_pages = {
 
 if os.environ.get('WEBSITE_BUILD'):
     html_additional_pages['demo'] = 'demo.html'
-    html_static_path.append('_build/pyodide')
+    html_static_path.append('_build/wheel')
 
 # If false, no module index is generated.
 #html_domain_indices = True
@@ -230,14 +234,32 @@ man_pages = [
 # Example configuration for intersphinx: refer to the Python standard library.
 #intersphinx_mapping = {'http://docs.python.org/': None}
 
+
 rst_prolog = f'.. |language_count| replace:: {len(list(pygments.lexers.get_all_lexers()))}'
+
 
 def pg_context(app, pagename, templatename, ctx, event_arg):
     # casting string to bool doesn't work, we'll use 0 to disable
-    ctx['demo_active'] = os.environ.get('WEBSITE_BUILD')  != '0'
+    ctx['demo_active'] = os.environ.get('WEBSITE_BUILD') != '0'
 
     if pagename == 'demo':
         ctx['lexers'] = sorted(pygments.lexers.get_all_lexers(plugins=False), key=lambda x: x[0].lower())
+        # We need the wheel name for the demo to work, and we don't want to pass
+        # the version in here, so we just glob any wheel as there's only one
+        ctx['wheel_filename'] = os.path.basename(glob.glob('_build/wheel/pygments-*.whl')[0])
+
+    # Pages with a known, very long list of TOC items
+    ctx['toc_dropdown'] = pagename in {
+        'docs/changelog',
+        'docs/lexers',
+    }
+    if ctx['toc_dropdown']:
+        toc = document_toc(app.env, pagename, app.tags)
+        ctx['toc_entries'] = [
+            (ref.astext(), ref['anchorname'],)
+            for ref in toc.findall(nodes.reference)
+            if ref['anchorname']
+        ]
 
     if pagename in ('styles', 'demo'):
         with open('examples/example.py', encoding='utf-8') as f:
@@ -269,7 +291,8 @@ def pg_context(app, pagename, templatename, ctx, event_arg):
         def sortkey(s):
             return (-s['bg_luminance'], s['name'])
         # the default style is always displayed first
-        default_style = ctx['styles_aa'].pop(0)
+        default_style = next(s for s in ctx['styles_aa'] if s['name'] == 'default')
+        ctx['styles_aa'].remove(default_style)
         ctx['styles_aa'].sort(key=sortkey)
         ctx['styles_aa'].insert(0, default_style)
         ctx['styles_sub_aa'].sort(key=sortkey)
